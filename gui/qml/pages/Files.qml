@@ -193,8 +193,8 @@ Item {
           Row {
             id: actions
             visible: row.finished
-            anchors.right: status.left
-            anchors.rightMargin: 12
+            anchors.right: parent.right
+            anchors.rightMargin: 19
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
             OutlineButton {
@@ -213,7 +213,7 @@ Item {
           Txt {
             id: status
             anchors.right: parent.right
-            anchors.rightMargin: 19
+            anchors.rightMargin: 19 + row.actionsWidth
             anchors.verticalCenter: parent.verticalCenter
             width: row.statusWidth
             horizontalAlignment: Text.AlignRight

@@ -152,15 +152,20 @@ func (d *Daemon) OpenTransfer(id string) error {
 	return desktop.Open(path)
 }
 
-// CopyTransfer puts the file of a finished transfer on the clipboard. An
-// image of at most maxClipboardImage bytes goes on as image data, so that it
-// pastes into chats and editors. Any other file goes on as a file URI, so
-// that it pastes into a file manager.
+// CopyTransfer puts the file of a finished transfer on the clipboard.
 func (d *Daemon) CopyTransfer(id string) error {
 	path, err := d.transferPath(id)
 	if err != nil {
 		return err
 	}
+	return d.copyFile(path)
+}
+
+// copyFile puts the file at path on the clipboard. An image of at most
+// maxClipboardImage bytes goes on as image data, so that it pastes into
+// chats and editors. Any other file goes on as a file URI, so that it
+// pastes into a file manager.
+func (d *Daemon) copyFile(path string) error {
 	if info, err := os.Stat(path); err == nil && info.Size() <= maxClipboardImage {
 		if data, err := os.ReadFile(path); err == nil {
 			if mime := http.DetectContentType(data); strings.HasPrefix(mime, "image/") {
@@ -313,6 +318,16 @@ func (d *Daemon) receiveFile(dev *Device, l *lan.Link, p *proto.Packet, name str
 		title = "Photo from " + dev.Name
 	case destScreenshot:
 		title = "Screenshot from " + dev.Name
+		d.mu.Lock()
+		auto := d.cfg.AutoClipboard
+		d.mu.Unlock()
+		if auto {
+			if err := d.copyFile(t.Path); err != nil {
+				d.logf("copy screenshot %s: %v", t.Path, err)
+			} else {
+				body = "Copied to the clipboard. Saved as " + t.Path
+			}
+		}
 	case destSignature:
 		title = "Signature from " + dev.Name
 		if err := d.copyImage(t.Path); err != nil {
