@@ -56,6 +56,59 @@ func TestCopyImage(t *testing.T) {
 	}
 }
 
+func TestCopyFile(t *testing.T) {
+	dir := t.TempDir()
+	clip := &memClipboard{}
+	d := &Daemon{clip: clip}
+
+	// An image goes on the clipboard as image data.
+	png := filepath.Join(dir, "shot.png")
+	data := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 16)...)
+	if err := os.WriteFile(png, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.copyFile(png); err != nil {
+		t.Fatal(err)
+	}
+	if clip.mime != "image/png" || string(clip.image) != string(data) {
+		t.Errorf("clipboard has %q as %s", clip.image, clip.mime)
+	}
+
+	// Any other file goes on the clipboard as a file URI.
+	doc := filepath.Join(dir, "a b.pdf")
+	if err := os.WriteFile(doc, []byte("%PDF-1.7"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.copyFile(doc); err != nil {
+		t.Fatal(err)
+	}
+	want := "file://" + filepath.ToSlash(dir) + "/a%20b.pdf\r\n"
+	if clip.mime != "text/uri-list" || string(clip.image) != want {
+		t.Errorf("clipboard has %q as %s, want %q", clip.image, clip.mime, want)
+	}
+}
+
+func TestTransferPath(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "IMG_1.jpg")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{transfers: []*Transfer{
+		{ID: "done", Name: "IMG_1.jpg", Path: file, State: "done"},
+		{ID: "active", Name: "VID.mp4", Path: filepath.Join(dir, "VID.mp4"), State: "active"},
+		{ID: "gone", Name: "old.txt", Path: filepath.Join(dir, "old.txt"), State: "done"},
+	}}
+	if got, err := d.transferPath("done"); err != nil || got != file {
+		t.Errorf("done: got %q, %v", got, err)
+	}
+	for _, id := range []string{"active", "gone", "missing"} {
+		if _, err := d.transferPath(id); err == nil {
+			t.Errorf("%s: no error", id)
+		}
+	}
+}
+
 func TestWriteScan(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "flux", "scanned")
 	now := time.Date(2026, 9, 25, 11, 15, 30, 0, time.Local)

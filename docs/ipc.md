@@ -67,6 +67,7 @@ flux watch
 | State | `state`, `subscribe`, `discover` |
 | Pairing | `pair.request`, `pair.accept`, `pair.reject`, `pair.unpair` |
 | Sharing | `clipboard.send`, `share.files`, `share.url` |
+| Transfers | `transfer.cancel`, `transfer.open`, `transfer.copy` |
 | Commands | `commands.add`, `commands.remove`, `commands.run` |
 | Media | `media.action` |
 | Streams | `webcam.config`, `webcam.stop`, `mic.stop`, `screen.stop` |
