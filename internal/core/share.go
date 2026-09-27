@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +122,54 @@ func (d *Daemon) CancelTransfer(id string) error {
 		}
 	}
 	return apiErr("not_found", "No transfer with ID %s", id)
+}
+
+// transferPath returns the local file of a finished transfer.
+func (d *Daemon) transferPath(id string) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, t := range d.transfers {
+		if t.ID != id {
+			continue
+		}
+		if t.State != "done" || t.Path == "" {
+			return "", apiErr("not_ready", "%s is not a finished file", t.Name)
+		}
+		if _, err := os.Stat(t.Path); err != nil {
+			return "", apiErr("not_found", "%s no longer exists", t.Path)
+		}
+		return t.Path, nil
+	}
+	return "", apiErr("not_found", "No transfer with ID %s", id)
+}
+
+// OpenTransfer opens the file of a finished transfer with the default app.
+func (d *Daemon) OpenTransfer(id string) error {
+	path, err := d.transferPath(id)
+	if err != nil {
+		return err
+	}
+	return desktop.Open(path)
+}
+
+// CopyTransfer puts the file of a finished transfer on the clipboard. An
+// image of at most maxClipboardImage bytes goes on as image data, so that it
+// pastes into chats and editors. Any other file goes on as a file URI, so
+// that it pastes into a file manager.
+func (d *Daemon) CopyTransfer(id string) error {
+	path, err := d.transferPath(id)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Stat(path); err == nil && info.Size() <= maxClipboardImage {
+		if data, err := os.ReadFile(path); err == nil {
+			if mime := http.DetectContentType(data); strings.HasPrefix(mime, "image/") {
+				return d.clip.SetImage(data, mime)
+			}
+		}
+	}
+	uri := (&url.URL{Scheme: "file", Path: path}).String()
+	return d.clip.SetImage([]byte(uri+"\r\n"), "text/uri-list")
 }
 
 // handleShare receives a file, a text, or a URL.
