@@ -126,12 +126,14 @@ func (d *Daemon) Snapshot() json.RawMessage {
 			"pauseMediaOnCall": d.cfg.PauseMediaOnCall,
 			"downloadDir":      d.cfg.DownloadPath(),
 			"syncDnd":          d.cfg.SyncDnd,
+			"herdr":            d.cfg.Herdr,
+			"herdrControl":     d.cfg.HerdrControl,
+			"remoteInput":      d.cfg.RemoteInput,
 		},
-		"webcam":   d.webcamViewLocked(),
-		"mic":      d.micViewLocked(),
-		"screen":   d.screenViewLocked(),
-		"ringing":  d.ringing,
-		"ringFrom": d.ringFrom,
+		"webcam": d.webcamViewLocked(),
+		"mic":    d.micViewLocked(),
+		"screen": d.screenViewLocked(),
+		"herdr":  d.herdrViewLocked(),
 	})
 }
 
@@ -162,10 +164,9 @@ type params struct {
 	Message   string          `json:"message"`
 	Paths     []string        `json:"paths"`
 	Path      string          `json:"path"`
-	Player    string          `json:"player"`
 	Action    string          `json:"action"`
-	Position  int64           `json:"position"`
 	Thread    int64           `json:"thread"`
+	Address   string          `json:"address"`
 	Addresses []string        `json:"addresses"`
 	Body      string          `json:"body"`
 	Title     string          `json:"title"`
@@ -194,9 +195,6 @@ func (d *Daemon) Call(ctx context.Context, method string, raw json.RawMessage) (
 	case "discover":
 		d.announce()
 		return ok, nil
-	case "ring.stop":
-		d.StopRing()
-		return ok, nil
 	case "webcam.stop":
 		return ok, d.StopWebcam()
 	case "webcam.config":
@@ -214,6 +212,9 @@ func (d *Daemon) Call(ctx context.Context, method string, raw json.RawMessage) (
 	case "approve.cancel":
 		return ok, d.ApproveCancel(p.ID)
 	case "clipboard.copy":
+		if p.Path != "" {
+			return ok, d.CopyClipImage(p.Path)
+		}
 		if p.Text == "" {
 			return nil, apiErr("bad_params", "text is empty")
 		}
@@ -256,7 +257,20 @@ func (d *Daemon) Call(ctx context.Context, method string, raw json.RawMessage) (
 		return nil, apiErr("not_paired", "%s is not paired", dev.Name)
 	}
 	switch method {
+	case "addresses.add", "addresses.remove":
+		change := d.AddAddress
+		if method == "addresses.remove" {
+			change = d.RemoveAddress
+		}
+		addr, addrs, err := change(dev, p.Address)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"device": dev.Name, "address": addr, "addresses": addrs}, nil
 	case "ring":
+		if !dev.accepts(proto.TypeFindMyPhone) {
+			return nil, apiErr("not_supported", "%s cannot ring. Flux rings only phones and tablets", dev.Name)
+		}
 		return ok, d.send(dev, proto.New(proto.TypeFindMyPhone, map[string]any{}))
 	case "ping":
 		body := map[string]any{}
@@ -282,14 +296,16 @@ func (d *Daemon) Call(ctx context.Context, method string, raw json.RawMessage) (
 		return ok, d.ShareText(dev, "url", p.URL)
 	case "notification.dismiss":
 		return ok, d.DismissNotification(dev, p.ID)
+	case "notification.dismissAll":
+		n, err := d.DismissAllNotifications(dev)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"dismissed": n}, nil
 	case "notification.reply":
 		return ok, d.ReplyNotification(dev, p.ID, p.Message)
 	case "notification.action":
 		return ok, d.NotificationAction(dev, p.ID, p.Action)
-	case "media.action":
-		return ok, d.PhoneMediaAction(dev, p.Player, p.Action)
-	case "media.seek":
-		return ok, d.PhoneMediaSeek(dev, p.Player, p.Position)
 	case "sms.refresh":
 		return ok, d.RefreshSms(dev)
 	case "sms.thread":
@@ -391,6 +407,12 @@ func (d *Daemon) setSetting(key string, value any) error {
 		d.cfg.PauseMediaOnCall = b
 	case key == "syncDnd" && isBool:
 		d.cfg.SyncDnd = b
+	case key == "herdr" && isBool:
+		d.cfg.Herdr = b
+	case key == "herdrControl" && isBool:
+		d.cfg.HerdrControl = b
+	case key == "remoteInput" && isBool:
+		d.cfg.RemoteInput = b
 	case key == "name" && isString:
 		d.cfg.Name = strings.TrimSpace(s)
 	case key == "downloadDir" && isString:
@@ -407,6 +429,12 @@ func (d *Daemon) setSetting(key string, value any) error {
 	if key == "name" {
 		d.announce()
 	}
+	if key == "herdr" || key == "herdrControl" {
+		d.herdrChanged()
+	}
+	if key == "remoteInput" {
+		d.inputChanged()
+	}
 	d.markDirty()
 	return nil
 }
@@ -421,6 +449,8 @@ func (d *Daemon) Reload() error {
 	d.cfg = cfg
 	d.mu.Unlock()
 	d.commandsChanged()
+	d.herdrChanged()
+	d.inputChanged()
 	return nil
 }
 

@@ -25,6 +25,7 @@ object Plugins {
 
     fun onConnected(core: FluxCore, d: Device) {
         sendBattery(core, d)
+        HerdrSync.onConnected(d)
         // New images that no computer took yet go out now.
         CaptureWatch.poke()
         if (core.foreground && core.settings.syncClipboard) {
@@ -78,6 +79,10 @@ object Plugins {
             Types.FLUX_MIC -> org.omarchy.flux.mic.MicSession.onPacket(core, d, p)
             Types.FLUX_SCREEN -> org.omarchy.flux.screen.ScreenSession.onPacket(core, d, p)
             Types.FLUX_APPROVE -> Approvals.onPacket(core, d, p)
+            Types.FLUX_HERDR -> HerdrSync.onPacket(core, d, p)
+            Types.FLUX_CLIPBOARD_IMAGE -> ClipImage.receive(core, d, p)
+            Types.FLUX_INPUT -> d.remoteInput = p.bool("enabled")
+            Types.SMS_REQUEST, Types.SMS_REQUEST_CONVERSATIONS, Types.SMS_REQUEST_CONVERSATION -> SmsSync.onPacket(core, d, p)
         }
     }
 
@@ -101,6 +106,24 @@ object Plugins {
     /** Sends the local clipboard. Call it from the main thread while the app has focus. */
     fun sendClipboard(core: FluxCore, id: String): Boolean {
         val d = core.device(id) ?: return false
+        val name = d.identity.deviceName
+        Android.clipboardImage(core.app)?.let { (uri, mime) ->
+            if (Types.FLUX_CLIPBOARD_IMAGE !in d.identity.incoming) {
+                core.toast("Update Flux on $name to send images")
+                return false
+            }
+            core.settings.clipboardTimestamp = System.currentTimeMillis()
+            ClipImage.send(core, listOf(d), uri, mime) { sent ->
+                core.toast(
+                    when {
+                        sent > 0 -> "Image sent to $name"
+                        sent < 0 -> "The image is larger than ${ClipImage.MAX_BYTES shr 20} MB"
+                        else -> "Sending the image failed"
+                    },
+                )
+            }
+            return true
+        }
         val text = Android.clipboardText(core.app)
         if (text.isNullOrEmpty()) {
             core.toast("The clipboard is empty")
@@ -115,6 +138,14 @@ object Plugins {
     /** Called when the local clipboard changes while the app is on screen. */
     fun onLocalClipboard(core: FluxCore) {
         if (!core.settings.syncClipboard) return
+        Android.clipboardImage(core.app)?.let { (uri, mime) ->
+            if (uri == ClipImage.lastRemote) return
+            val computers = core.connectedPaired().filter { Types.FLUX_CLIPBOARD_IMAGE in it.identity.incoming }
+            if (computers.isEmpty()) return
+            core.settings.clipboardTimestamp = System.currentTimeMillis()
+            ClipImage.send(core, computers, uri, mime)
+            return
+        }
         val text = Android.clipboardText(core.app) ?: return
         if (text == lastRemoteClip) return
         core.settings.clipboardTimestamp = System.currentTimeMillis()
@@ -159,18 +190,7 @@ object Plugins {
             d.currentPlayer?.let { requestNowPlaying(d, it) }
         }
         val name = p.string("player") ?: return
-        val old = d.playerStates[name] ?: PlayerState(name)
-        val b = p.body
-        d.playerStates[name] = old.copy(
-            title = b.str("title") ?: old.title,
-            artist = b.str("artist") ?: old.artist,
-            album = b.str("album") ?: old.album,
-            playing = b.bool("isPlaying") ?: old.playing,
-            position = b.long("pos") ?: old.position,
-            length = b.long("length") ?: old.length,
-            canSeek = b.bool("canSeek") ?: old.canSeek,
-            updatedAt = SystemClock.elapsedRealtime(),
-        )
+        d.playerStates[name] = mergePlayer(d.playerStates[name] ?: PlayerState(name), p.body, SystemClock.elapsedRealtime())
         if (d.currentPlayer == null) d.currentPlayer = name
         val cur = d.currentPlayer?.let { d.playerStates[it] }
         if (cur != null && !cur.playing && d.playerStates[name]?.playing == true) d.currentPlayer = name
@@ -208,6 +228,17 @@ object Plugins {
         }
     }
 
+    /** Sets the volume of the current player, from 0 to 100. */
+    fun setVolume(core: FluxCore, id: String, volume: Int) {
+        val d = core.device(id) ?: return
+        val player = d.currentPlayer ?: return
+        val v = volume.coerceIn(0, 100)
+        d.send(Packet(Types.MPRIS_REQUEST, bodyOf("player" to player, "setVolume" to v)))
+        core.locked {
+            d.playerStates[player]?.let { d.playerStates[player] = it.copy(volume = v) }
+        }
+    }
+
     fun seek(core: FluxCore, id: String, positionMs: Long) {
         val d = core.device(id) ?: return
         val player = d.currentPlayer ?: return
@@ -216,12 +247,24 @@ object Plugins {
             d.playerStates[player]?.let { d.playerStates[player] = it.copy(position = positionMs, updatedAt = SystemClock.elapsedRealtime()) }
         }
     }
-
-    // ------------------------------------------------------------------- ring
-
-    fun ring(core: FluxCore, id: String) {
-        val d = core.device(id) ?: return
-        d.send(Packet(Types.FIND_MY_PHONE))
-        core.toast("Ringing ${d.identity.deviceName}")
-    }
 }
+
+/**
+ * Merges a kdeconnect.mpris packet from the computer into the state of a
+ * player. A field that the packet leaves out keeps its old value. The
+ * volume is different: the computer sends the whole state with isPlaying,
+ * and leaves out the volume for a player that takes no volume.
+ */
+internal fun mergePlayer(old: PlayerState, b: JsonObject, at: Long): PlayerState = old.copy(
+    title = b.str("title") ?: old.title,
+    artist = b.str("artist") ?: old.artist,
+    album = b.str("album") ?: old.album,
+    playing = b.bool("isPlaying") ?: old.playing,
+    position = b.long("pos") ?: old.position,
+    length = b.long("length") ?: old.length,
+    canSeek = b.bool("canSeek") ?: old.canSeek,
+    canGoNext = b.bool("canGoNext") ?: old.canGoNext,
+    canGoPrevious = b.bool("canGoPrevious") ?: old.canGoPrevious,
+    volume = if ("isPlaying" in b) b.long("volume")?.toInt()?.coerceIn(0, 100) else old.volume,
+    updatedAt = at,
+)

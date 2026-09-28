@@ -28,8 +28,15 @@ type Device struct {
 	Cert     *x509.Certificate
 	LastSeen time.Time
 
+	// Addresses are the extra host names and IP addresses of a paired
+	// device. They come from the trust store.
+	Addresses []string
+
 	link     *lan.Link
 	mdnsSeen time.Time
+	// inputRefused is true after fluxd logged remote input that it
+	// ignored, so that it logs that once.
+	inputRefused bool
 
 	pairState string // "", "requested", or "incoming"
 	pairTime  int64
@@ -37,10 +44,10 @@ type Device struct {
 	pairTimer *time.Timer
 
 	battery       *Battery
+	batteryLow    bool // the low-battery notification of this discharge showed
 	signal        *Signal
 	notifications []*PhoneNotification
 	notifDesktop  map[string]uint32
-	media         *PhoneMedia
 	conversations map[int64]*Conversation
 	threadWait    map[int64][]chan []SmsMessage
 	sftpWait      []chan SftpInfo
@@ -73,6 +80,7 @@ func newDevice(id string) *Device {
 
 func (dev *Device) applyTrust(t config.TrustedDevice) {
 	dev.Name, dev.Type, dev.IP, dev.Port = t.Name, t.Type, t.LastIP, t.LastPort
+	dev.Addresses = t.Addresses
 	dev.Paired, dev.PairedAt = true, t.PairedAt
 	if c, err := proto.ParseCertPEM(t.CertPEM); err == nil {
 		dev.Cert = c
@@ -93,6 +101,10 @@ func (dev *Device) supports(typ string) bool { return slices.Contains(dev.Outgoi
 // accepts reports whether the device receives packets of the type.
 func (dev *Device) accepts(typ string) bool { return slices.Contains(dev.Incoming, typ) }
 
+// fluxApp reports whether the device runs Flux for Android or Flux for
+// macOS. Only the Flux apps send flux.tunnel.
+func (dev *Device) fluxApp() bool { return dev.supports(proto.TypeFluxTunnel) }
+
 // plugins returns the features that the device offers to this computer.
 // The window uses them to show or hide tabs. Each check looks at the
 // direction that the feature needs. For example, the Browse files tab
@@ -107,7 +119,6 @@ func (dev *Device) plugins() []string {
 		{"share", dev.accepts(proto.TypeShare)},
 		{"notifications", dev.supports(proto.TypeNotification)},
 		{"findmyphone", dev.accepts(proto.TypeFindMyPhone)},
-		{"mpris", dev.supports(proto.TypeMpris)},
 		{"sms", dev.supports(proto.TypeSmsMessages)},
 		{"runcommand", dev.supports(proto.TypeRunCommandRequest)},
 		{"sftp", dev.sharesStorage()},
@@ -148,6 +159,7 @@ type DeviceView struct {
 	Name          string               `json:"name"`
 	Type          string               `json:"type"`
 	IP            string               `json:"ip"`
+	Addresses     []string             `json:"addresses"`
 	Paired        bool                 `json:"paired"`
 	Online        bool                 `json:"online"`
 	PairState     string               `json:"pairState"`
@@ -158,7 +170,6 @@ type DeviceView struct {
 	Signal        *Signal              `json:"signal"`
 	Plugins       []string             `json:"plugins"`
 	Notifications []*PhoneNotification `json:"notifications"`
-	Media         *PhoneMedia          `json:"media"`
 	Conversations []*Conversation      `json:"conversations"`
 }
 
@@ -170,11 +181,11 @@ func (dev *Device) view() DeviceView {
 		state = "none"
 	}
 	v := DeviceView{
-		ID: dev.ID, Name: dev.Name, Type: dev.Type, IP: dev.IP,
+		ID: dev.ID, Name: dev.Name, Type: dev.Type, IP: dev.IP, Addresses: dev.Addresses,
 		Paired: dev.Paired, Online: dev.link != nil,
 		PairState: state, PairKey: dev.pairKey, PairedAt: dev.PairedAt,
 		Battery: dev.battery, Signal: dev.signal,
-		Plugins: dev.plugins(), Notifications: dev.notifications, Media: dev.media,
+		Plugins: dev.plugins(), Notifications: dev.notifications,
 	}
 	if v.Type == "" {
 		v.Type = "phone"
@@ -184,6 +195,9 @@ func (dev *Device) view() DeviceView {
 	}
 	if v.Notifications == nil {
 		v.Notifications = []*PhoneNotification{}
+	}
+	if v.Addresses == nil {
+		v.Addresses = []string{}
 	}
 	v.Conversations = sortedConversations(dev.conversations)
 	return v

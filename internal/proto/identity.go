@@ -34,6 +34,10 @@ const (
 	TypeSmsConversation     = "kdeconnect.sms.request_conversation"
 	TypeConnectivity        = "kdeconnect.connectivity_report"
 	TypeTelephony           = "kdeconnect.telephony"
+	// TypeMousepadRequest moves the pointer, clicks, scrolls, and types on
+	// this computer. The phone sends it. docs/remote-input.md describes
+	// the body.
+	TypeMousepadRequest = "kdeconnect.mousepad.request"
 
 	// TypeFluxTunnel carries the port of a listener that a Flux phone opens,
 	// so that fluxd can connect out for payloads and Browse PC. The phone
@@ -54,27 +58,41 @@ const (
 	// TypeFluxApprove carries approval and enrollment requests to the phone,
 	// and the signed answers back. docs/approve.md describes it.
 	TypeFluxApprove = "flux.approve"
+	// TypeFluxHerdr carries the herdr agents of the computer to the phone,
+	// and the requests of the phone for the agent list and recent output.
+	// Both sides send it. docs/herdr.md describes it.
+	TypeFluxHerdr = "flux.herdr"
+	// TypeFluxClipboardImage carries an image that one side copied. The
+	// payload is the image, and the body names its MIME type, {"mime":
+	// "image/png"}. Both sides send it. A phone lists it as incoming only
+	// while its clipboard sync is on.
+	TypeFluxClipboardImage = "flux.clipboard.image"
+	// TypeFluxInput tells the phone whether this computer accepts remote
+	// input, {"enabled": bool}. fluxd sends it after the link starts and
+	// after the setting changes.
+	TypeFluxInput = "flux.input"
 )
 
 // Incoming lists the packet types that Flux accepts. The phone enables a
 // plugin only when the other side lists the matching type.
 var Incoming = []string{
 	TypePing, TypeBattery, TypeClipboard, TypeClipboardConnect,
-	TypeShare, TypeShareUpdate, TypeNotification, TypeFindMyPhone,
-	TypeRunCommandRequest, TypeMpris, TypeMprisRequest, TypeSftp,
-	TypeSftpRequest, TypeSmsMessages, TypeConnectivity, TypeTelephony,
+	TypeShare, TypeShareUpdate, TypeNotification, TypeRunCommandRequest,
+	TypeMprisRequest, TypeSftp, TypeSftpRequest,
+	TypeSmsMessages, TypeConnectivity, TypeTelephony,
 	TypeFluxTunnel, TypeFluxWebcam, TypeFluxDnd, TypeFluxMic, TypeFluxScreen,
-	TypeFluxApprove,
+	TypeFluxApprove, TypeFluxHerdr, TypeFluxClipboardImage, TypeMousepadRequest,
 }
 
 // Outgoing lists the packet types that Flux sends.
 var Outgoing = []string{
 	TypePing, TypeBattery, TypeClipboard, TypeClipboardConnect, TypeShare,
 	TypeNotification, TypeNotificationRequest, TypeNotificationReply, TypeNotificationAction,
-	TypeFindMyPhone, TypeRunCommand, TypeMpris, TypeMprisRequest,
+	TypeFindMyPhone, TypeRunCommand, TypeMpris,
 	TypeSftpRequest, TypeSmsRequest, TypeSmsConversations,
 	TypeSmsConversation, TypeSftp, TypeFluxWebcam, TypeFluxDnd,
-	TypeFluxMic, TypeFluxScreen, TypeFluxApprove,
+	TypeFluxMic, TypeFluxScreen, TypeFluxApprove, TypeFluxHerdr,
+	TypeFluxClipboardImage, TypeFluxInput,
 }
 
 // Identity is the body of a kdeconnect.identity packet.

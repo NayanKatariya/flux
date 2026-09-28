@@ -40,6 +40,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -60,6 +61,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import org.omarchy.flux.core.CaptureKind
 import org.omarchy.flux.core.CaptureWatch
@@ -67,6 +69,8 @@ import org.omarchy.flux.core.DeviceUi
 import org.omarchy.flux.core.FluxCore
 import org.omarchy.flux.core.Plugins
 import org.omarchy.flux.core.Share
+import org.omarchy.flux.core.SmsSync
+import org.omarchy.flux.core.ThemeMode
 import org.omarchy.flux.core.UiState
 import org.omarchy.flux.screen.ScreenMirrorService
 import org.omarchy.flux.screen.ScreenSession
@@ -116,7 +120,7 @@ fun TiledDevicesScreen(
                     Sym(Ic.refresh, size = 16.dp, tint = Tn.sub)
                     T(if (refreshing) "Searching…" else "Refresh", size = 12, color = Tn.sub)
                 }
-                AppMenu()
+                AppMenu(state.theme)
             }
             Tile(Modifier.fillMaxWidth(), border = activeBorder(), padding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -166,13 +170,26 @@ fun TiledDevicesScreen(
     }
 }
 
-/** The menu of the device list. */
+/** The menu of the device list: the theme of the app, and Flux off. */
 @Composable
-private fun AppMenu() {
+private fun AppMenu(theme: ThemeMode) {
     var open by remember { mutableStateOf(false) }
     Box {
         SquareButton(Ic.more, "More options", { open = true }, size = 32.dp)
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            TileLabel("Theme", Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+            for ((mode, label, icon) in ThemeItems) {
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    leadingIcon = { Sym(icon) },
+                    trailingIcon = { if (mode == theme) Sym(Ic.check, "Selected", tint = Tn.blue) },
+                    onClick = {
+                        open = false
+                        FluxCore.setTheme(mode)
+                    },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Tn.line)
             DropdownMenuItem(
                 text = { Text("Turn off Flux") },
                 leadingIcon = { Sym(Ic.power) },
@@ -184,6 +201,12 @@ private fun AppMenu() {
         }
     }
 }
+
+private val ThemeItems = listOf(
+    Triple(ThemeMode.System, "System", Ic.systemTheme),
+    Triple(ThemeMode.Light, "Light", Ic.lightMode),
+    Triple(ThemeMode.Dark, "Dark", Ic.darkMode),
+)
 
 @Composable
 private fun PairedTile(d: DeviceUi, modifier: Modifier, onOpen: () -> Unit, onUnpair: () -> Unit) {
@@ -270,8 +293,8 @@ fun TiledPairSheet(name: String, key: String, waiting: Boolean, onCancel: () -> 
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (waiting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Tn.bg)
-                            T(if (waiting) "Waiting" else "Pair", size = 14, color = Tn.bg, weight = FontWeight.SemiBold)
+                            if (waiting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Tn.onAccent)
+                            T(if (waiting) "Waiting" else "Pair", size = 14, color = Tn.onAccent, weight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -309,6 +332,15 @@ fun TiledHomeScreen(
             FluxCore.toast("Call alerts need phone access. Allow it in the app settings.")
         }
     }
+    // Text messages need to read and send SMS. The contacts add the names,
+    // and the user can refuse them.
+    val askSms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (SmsSync.hasAccess(context)) {
+            FluxCore.setSyncSms(true)
+        } else {
+            FluxCore.toast("Text messages need SMS access. Allow it in the app settings.")
+        }
+    }
     // The first capture switch that turns on asks for access to photos.
     var asking by remember { mutableStateOf<CaptureKind?>(null) }
     val askPhotos = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -343,8 +375,8 @@ fun TiledHomeScreen(
             }
         }
     }
-    val sync = listOf(
-        SyncItem(Ic.notifications, "Share notifications", state.shareNotifications && state.notificationAccess) {
+    val sync = buildList {
+        add(SyncItem(Ic.notifications, "Share notifications", state.shareNotifications && state.notificationAccess) {
             if (!state.notificationAccess) {
                 FluxCore.setShareNotifications(true)
                 val intent = if (Build.VERSION.SDK_INT >= 30) {
@@ -358,26 +390,37 @@ fun TiledHomeScreen(
             } else {
                 FluxCore.setShareNotifications(!state.shareNotifications)
             }
-        },
-        SyncItem(Ic.paste, "Sync clipboard", state.syncClipboard) { FluxCore.setSyncClipboard(!state.syncClipboard) },
-        SyncItem(Ic.call, "Call alerts", state.callAlerts && state.callAccess) {
+        })
+        add(SyncItem(Ic.paste, "Sync clipboard", state.syncClipboard) { FluxCore.setSyncClipboard(!state.syncClipboard) })
+        add(SyncItem(Ic.call, "Call alerts", state.callAlerts && state.callAccess) {
             if (!state.callAccess) {
                 askPhone.launch(arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_CONTACTS))
             } else {
                 FluxCore.setCallAlerts(!state.callAlerts)
             }
-        },
-        SyncItem(Ic.dnd, "Sync Do Not Disturb", state.syncDnd && state.dndAccess) {
+        })
+        // A tablet without a SIM slot has no text messages.
+        if (state.smsSupported) {
+            add(SyncItem(Ic.sms, "Text messages", state.smsSync && state.smsAccess) {
+                if (!state.smsAccess) askSms.launch(SmsSync.permissions()) else FluxCore.setSyncSms(!state.smsSync)
+            })
+        }
+        add(SyncItem(Ic.dnd, "Sync Do Not Disturb", state.syncDnd && state.dndAccess) {
             if (!state.dndAccess) {
                 FluxCore.setSyncDnd(true)
                 runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
             } else {
                 FluxCore.setSyncDnd(!state.syncDnd)
             }
-        },
-        SyncItem(Ic.screenshot, "Send new screenshots", state.sendScreenshots && state.mediaAccess) { captureToggle(CaptureKind.Screenshot, state.sendScreenshots) },
-        SyncItem(Ic.gallery, "Send new photos", state.sendPhotos && state.mediaAccess) { captureToggle(CaptureKind.Photo, state.sendPhotos) },
-    )
+        })
+        add(SyncItem(Ic.screenshot, "Send new screenshots", state.sendScreenshots && state.mediaAccess) { captureToggle(CaptureKind.Screenshot, state.sendScreenshots) })
+        add(SyncItem(Ic.gallery, "Send new photos", state.sendPhotos && state.mediaAccess) { captureToggle(CaptureKind.Photo, state.sendPhotos) })
+        // The agent alerts apply to every computer. They show only on a computer that sends herdr agents.
+        if (d.herdrSupported) {
+            add(SyncItem(Ic.notificationsActive, "Agent needs input", state.agentInputAlerts) { FluxCore.setAgentInputAlerts(!state.agentInputAlerts) })
+            add(SyncItem(Ic.checkCircle, "Agent finished", state.agentDoneAlerts) { FluxCore.setAgentDoneAlerts(!state.agentDoneAlerts) })
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = TiledGutter)) {
         TiledTopBar("${typeLabel(d)} · ${d.ip}", onBack) { DeviceMenu(d.name, onUnpair) }
@@ -396,13 +439,7 @@ fun TiledHomeScreen(
                     LineTile(Ic.camera, "Camera", Tn.cyan, guarded { onNavigate("camera") }, Modifier.weight(1f).fillMaxWidth(), on)
                 }
             }
-            TileRow(TileUnit2) {
-                MediaTile(d, Modifier.weight(4f).fillMaxHeight(), onOpen = guarded { onNavigate("media") })
-                Tile(Modifier.weight(2f).fillMaxHeight(), guarded { Plugins.ring(FluxCore, d.id) }, accent = Tn.red, enabled = on, padding = PaddingValues(12.dp)) {
-                    Sym(Ic.ring, tint = Tn.red, size = 24.dp)
-                    T("Ring PC", size = 13, weight = FontWeight.SemiBold, maxLines = 1)
-                }
-            }
+            MediaTile(d, Modifier.fillMaxWidth().height(TileUnit2), onOpen = guarded { onNavigate("media") })
             TileRow(TileUnit) {
                 MiniTile(Ic.mic, "Mic", Tn.orange, guarded { onNavigate("mic") }, Modifier.weight(1f).fillMaxHeight(), on)
                 if (mirroring) {
@@ -413,8 +450,28 @@ fun TiledHomeScreen(
                     }, Modifier.weight(1f).fillMaxHeight(), on)
                 }
                 MiniTile(Ic.terminal, "Commands", Tn.yellow, guarded { onNavigate("commands") }, Modifier.weight(1f).fillMaxHeight(), on)
+                if (d.herdrSupported) {
+                    MiniTile(
+                        Ic.agent, "Agents", Tn.magenta, guarded { onNavigate("agents") }, Modifier.weight(1f).fillMaxHeight(), on,
+                        badge = if (on) d.herdr?.blocked ?: 0 else 0,
+                    )
+                }
             }
             LineTile(Ic.folderOpen, "Browse PC", Tn.magenta, guarded { onNavigate("browse") }, Modifier.fillMaxWidth().height(TileUnit), on, trailing = "~/ read-only")
+            // Remote input can type in any window of the computer, so it asks for the phone lock first.
+            if (d.inputSupported) {
+                LineTile(
+                    Ic.touchpad, "Touchpad and keyboard", Tn.green,
+                    guarded {
+                        if (d.remoteInput == true) {
+                            ReplyLock.run(context, { onNavigate("touchpad") }, "Use the touchpad", "use the touchpad") { FluxCore.toast(it) }
+                        } else {
+                            onNavigate("touchpad")
+                        }
+                    },
+                    Modifier.fillMaxWidth().height(TileUnit), on, trailing = if (d.remoteInput == true) null else "off",
+                )
+            }
         }
 
         SectionLabel("Sync")
@@ -484,7 +541,7 @@ private fun MediaTile(d: DeviceUi, modifier: Modifier, onOpen: () -> Unit) {
                     Modifier.size(34.dp).clip(CircleShape).background(Tn.green)
                         .clickable { Plugins.mediaAction(FluxCore, d.id, "PlayPause") },
                     contentAlignment = Alignment.Center,
-                ) { Sym(if (playing) Ic.pause else Ic.play, if (playing) "Pause" else "Play", tint = Tn.bg, size = 22.dp) }
+                ) { Sym(if (playing) Ic.pause else Ic.play, if (playing) "Pause" else "Play", tint = Tn.onAccent, size = 22.dp) }
             }
         }
     }
@@ -517,6 +574,9 @@ fun TiledMediaScreen(d: DeviceUi, onBack: () -> Unit) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     // The position that the user drags to, until the drag ends.
     var dragging by remember { mutableStateOf<Float?>(null) }
+    // The volume that the user drags to, and the time of the last volume sent.
+    var volumeDrag by remember { mutableStateOf<Float?>(null) }
+    var volumeSentAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(d.id) {
         while (true) {
             Plugins.requestPlayers(FluxCore, d.id)
@@ -553,7 +613,7 @@ fun TiledMediaScreen(d: DeviceUi, onBack: () -> Unit) {
                             name,
                             Modifier.clip(RoundedCornerShape(8.dp)).background(if (sel) Tn.green else Tn.tile)
                                 .clickable { Plugins.selectPlayer(FluxCore, d.id, name) }.padding(horizontal = 10.dp, vertical = 6.dp),
-                            size = 12, color = if (sel) Tn.bg else Tn.sub, family = Mono, weight = FontWeight.Medium,
+                            size = 12, color = if (sel) Tn.onAccent else Tn.sub, family = Mono, weight = FontWeight.Medium,
                         )
                     }
                 }
@@ -602,15 +662,54 @@ fun TiledMediaScreen(d: DeviceUi, onBack: () -> Unit) {
                 }
             }
             TileRow(64.dp) {
-                ControlTile(Ic.previous, "Previous", Modifier.weight(1f)) { Plugins.mediaAction(FluxCore, d.id, "Previous") }
+                ControlTile(Ic.previous, "Previous", Modifier.weight(1f), p.canGoPrevious) { Plugins.mediaAction(FluxCore, d.id, "Previous") }
                 Tile(
                     Modifier.weight(1f).fillMaxHeight(), { Plugins.mediaAction(FluxCore, d.id, "PlayPause") },
                     container = Tn.green, border = null, padding = PaddingValues(0.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                 ) {
-                    Sym(if (p.playing) Ic.pause else Ic.play, if (p.playing) "Pause" else "Play", tint = Tn.bg, size = 34.dp)
+                    Sym(if (p.playing) Ic.pause else Ic.play, if (p.playing) "Pause" else "Play", tint = Tn.onAccent, size = 34.dp)
                 }
-                ControlTile(Ic.next, "Next", Modifier.weight(1f)) { Plugins.mediaAction(FluxCore, d.id, "Next") }
+                ControlTile(Ic.next, "Next", Modifier.weight(1f), p.canGoNext) { Plugins.mediaAction(FluxCore, d.id, "Next") }
+            }
+            // Only a player that takes a volume sends one. Chromium, for example, does not.
+            val volume = p.volume
+            if (volume != null) {
+                Tile(Modifier.fillMaxWidth(), border = null, padding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Sym(Ic.volume, "Volume", tint = Tn.green, size = 22.dp)
+                        val colors = SliderDefaults.colors(thumbColor = Tn.green, activeTrackColor = Tn.green, inactiveTrackColor = Tn.line)
+                        val source = remember { MutableInteractionSource() }
+                        Slider(
+                            value = volumeDrag ?: volume.toFloat(),
+                            onValueChange = {
+                                volumeDrag = it
+                                // The player follows the drag. At most one request goes out each 150 ms.
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - volumeSentAt >= 150) {
+                                    volumeSentAt = now
+                                    Plugins.setVolume(FluxCore, d.id, it.roundToInt())
+                                }
+                            },
+                            onValueChangeFinished = {
+                                volumeDrag?.let { Plugins.setVolume(FluxCore, d.id, it.roundToInt()) }
+                                volumeDrag = null
+                            },
+                            valueRange = 0f..100f,
+                            modifier = Modifier.weight(1f),
+                            colors = colors,
+                            interactionSource = source,
+                            thumb = { SliderDefaults.Thumb(source, colors = colors, thumbSize = DpSize(4.dp, 18.dp)) },
+                            track = {
+                                SliderDefaults.Track(
+                                    it, Modifier.height(4.dp), colors = colors,
+                                    drawStopIndicator = null, thumbTrackGapSize = 4.dp,
+                                )
+                            },
+                        )
+                        T("${volumeDrag?.roundToInt() ?: volume}", size = 11, color = Tn.dim, family = Mono)
+                    }
+                }
             }
         }
         Spacer(Modifier.height(48.dp))
@@ -618,9 +717,9 @@ fun TiledMediaScreen(d: DeviceUi, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ControlTile(@DrawableRes icon: Int, description: String, modifier: Modifier, onClick: () -> Unit) {
+private fun ControlTile(@DrawableRes icon: Int, description: String, modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Tile(
-        modifier.fillMaxHeight(), onClick, accent = Tn.green, padding = PaddingValues(0.dp),
+        modifier.fillMaxHeight(), onClick.takeIf { enabled }, accent = Tn.green, enabled = enabled, padding = PaddingValues(0.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Sym(icon, description, size = 28.dp)

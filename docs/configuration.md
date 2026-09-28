@@ -21,6 +21,9 @@ notifications = true
 share_home = true
 pause_media_on_call = true
 sync_dnd = true
+herdr = true
+herdr_control = false
+remote_input = false
 gui = ""
 approve_timeout = 20
 
@@ -36,17 +39,20 @@ command = "omarchy-system-lock"
 | `download_dir` | Destination for received files. Defaults to the XDG Downloads directory, then `~/Downloads`. |
 | `scan_dir` | Destination for scanned text and documents. Defaults to `flux/scanned` inside the XDG Documents directory. |
 | `photo_dir` | Destination for camera photos. Defaults to `flux` inside the XDG Pictures directory. Screenshots and signatures use its `screenshots` and `signatures` folders. |
-| `auto_clipboard` | Sync clipboard text in both directions. Defaults to `true`. |
+| `auto_clipboard` | Sync clipboard text and images in both directions. Defaults to `true`. |
 | `notifications` | Show phone notifications on the desktop. Defaults to `true`. |
 | `share_home` | Let the phone browse the desktop home folder read-only. Defaults to `true`. |
 | `pause_media_on_call` | Pause desktop media during calls. Defaults to `true`. |
 | `sync_dnd` | Sync Do Not Disturb. Defaults to `true`. |
+| `herdr` | Show the [herdr agents](herdr.md) of this computer on the phone. Defaults to `true`. |
+| `herdr_control` | Let the phone send keys and prompts to the herdr agents. Defaults to `false`. See [Answer an agent](herdr.md#answer-an-agent). |
+| `remote_input` | Let the phone move the pointer and type on this computer. Defaults to `false`. See [Touchpad and keyboard](remote-input.md). |
 | `gui` | Use `app`, `plugin`, or an empty value for automatic host selection. |
 | `approve_timeout` | Wait 5 to 120 seconds for approval. Zero or an omitted value uses 20 seconds. |
 | `commands` | Desktop commands available to the phone. A new configuration has no commands. |
 
 The destination paths expand `~`.
-Use the [CLI](cli.md#media-and-desktop-commands) or the Phone commands page to add commands without editing TOML.
+Use the [CLI](cli.md#desktop-commands) or the Phone commands page to add commands without editing TOML.
 
 ## Data paths
 
@@ -56,7 +62,7 @@ Use the [CLI](cli.md#media-and-desktop-commands) or the Phone commands page to a
 | `~/.config/flux/off` | Marker that disables automatic daemon start |
 | `~/.local/share/flux/certificate.pem` | Desktop identity certificate |
 | `~/.local/share/flux/privateKey.pem` | Desktop identity private key |
-| `~/.local/share/flux/devices.json` | Paired devices and pinned certificates |
+| `~/.local/share/flux/devices.json` | Paired devices, pinned certificates, and [extra addresses](tailscale.md) |
 | `~/Documents/flux/scanned/` | Scanned text and documents by default |
 | `~/Pictures/flux/` | Camera photos by default |
 | `~/Pictures/flux/screenshots/` | Automatically received screenshots by default |
@@ -75,11 +81,12 @@ Its replacement changes the desktop identity and requires new pairing.
 | Variable | Use |
 | --- | --- |
 | `FLUX_SOCKET` | Override the local IPC socket path. |
-| `FLUX_GUI` | Select `app` or `plugin` for `flux open`. |
+| `FLUX_GUI` | Select `app` or `plugin` for `flux-cli open`. |
 | `FLUX_QML_DIR` | Load shared views from disk in the Qt host during development. |
 | `FLUX_THEME_FILE` | Select a theme file for the snapshot harness. |
 | `FLUX_SNAPSHOT` | Select the output directory for the QML snapshot harness. |
 | `FLUX_SNAPSHOT_ONLY` | Filter snapshot names by text. |
+| `HERDR_SOCKET_PATH` | Select the herdr session that `fluxd` follows. See [herdr agents](herdr.md#use-another-herdr-session). |
 
 Without `XDG_RUNTIME_DIR`, the daemon uses `flux-<uid>` inside the system temporary directory.
 See [development](development.md) for an isolated test environment.
@@ -87,11 +94,22 @@ See [development](development.md) for an isolated test environment.
 ## Turn Flux off or on
 
 ```sh
-flux off
-flux on
+flux-cli off
+flux-cli on
 ```
 
-`flux off` stops the daemon and creates the off marker.
-`flux on` removes the marker and starts the daemon.
+`flux-cli off` stops the daemon and creates the off marker.
+`flux-cli on` removes the marker and starts the daemon.
 On Android, use **Turn off Flux** in the device-list menu or **Turn off** in its notification.
 The phone stays off after a restart until you select **Turn on Flux** in the app.
+
+## Choose the Android theme
+
+To change the colors of the Android app:
+
+1. Open the menu on the device list.
+2. Select **System**, **Light**, or **Dark**.
+
+**System** is the default and follows the dark theme setting of the phone.
+**Light** uses the Tokyo Night Day colors.
+**Dark** uses the Tokyo Night colors.

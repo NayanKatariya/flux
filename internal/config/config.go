@@ -41,6 +41,15 @@ type Config struct {
 	PauseMediaOnCall bool `toml:"pause_media_on_call"`
 	// SyncDnd syncs Do Not Disturb between this computer and the phone.
 	SyncDnd bool `toml:"sync_dnd"`
+	// Herdr shows the herdr agents of this computer on the phone.
+	Herdr bool `toml:"herdr"`
+	// HerdrControl lets the phone send keys and prompts to the herdr
+	// agents. It is off by default, because an agent can run commands.
+	HerdrControl bool `toml:"herdr_control"`
+	// RemoteInput lets the phone move the pointer and type on this
+	// computer. It is off by default, because the phone can then type in
+	// any window, such as a terminal.
+	RemoteInput bool `toml:"remote_input"`
 	// GUI selects the window: "plugin" for the omarchy-shell plugin, "app"
 	// for flux-gui, or empty for the plugin when it is enabled.
 	GUI string `toml:"gui,omitempty"`
@@ -53,12 +62,12 @@ type Config struct {
 // ConfigDir returns ~/.config/flux, or $XDG_CONFIG_HOME/flux.
 func ConfigDir() string { return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "flux") }
 
-// OffPath returns the marker file that `flux off` writes. While it exists,
+// OffPath returns the marker file that `flux-cli off` writes. While it exists,
 // a fluxd that systemd starts exits at once, also when the service is
 // enabled for all users.
 func OffPath() string { return filepath.Join(ConfigDir(), "off") }
 
-// IsOff reports whether the user turned fluxd off with `flux off`.
+// IsOff reports whether the user turned fluxd off with `flux-cli off`.
 func IsOff() bool {
 	_, err := os.Stat(OffPath())
 	return err == nil
@@ -100,7 +109,7 @@ var mu sync.Mutex
 func Load() (*Config, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	c := &Config{AutoClipboard: true, Notifications: true, ShareHome: true, PauseMediaOnCall: true, SyncDnd: true}
+	c := &Config{AutoClipboard: true, Notifications: true, ShareHome: true, PauseMediaOnCall: true, SyncDnd: true, Herdr: true}
 	data, err := os.ReadFile(Path())
 	if errors.Is(err, os.ErrNotExist) {
 		c.Commands = []Command{}

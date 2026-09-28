@@ -66,6 +66,8 @@ object FluxCore {
         local = LocalCertificate.loadOrCreate(File(app.filesDir, "identity"))
         trust = TrustStore(app)
         settings = Settings(app)
+        // The system keeps the night mode of the app, but a restore or a data clear can change the setting.
+        Android.setNightMode(app, settings.theme)
         for (t in trust.all()) {
             val identity = Identity(t.id, t.name, t.type, 8, if (t.isFlux) listOf(Types.FLUX_TUNNEL) else emptyList(), emptyList())
             val d = Device(this, identity)
@@ -82,7 +84,19 @@ object FluxCore {
     /** The TLS context of the running backend, for payload transfers. */
     val tls: org.omarchy.flux.net.Tls? get() = backend?.tls
 
-    fun identity(tcpPort: Int): Identity = Identity.self(local.deviceId, deviceName, tcpPort)
+    fun identity(tcpPort: Int): Identity =
+        Identity.self(local.deviceId, deviceName, tcpPort, sms = SmsSync.enabled(app), clipboardImages = settings.syncClipboard)
+
+    /**
+     * Sends the identity again to each connected computer. The SMS packet
+     * types in it follow the Text messages switch, and a computer shows its
+     * Messages page from them. The clipboard image type follows the Sync
+     * clipboard switch.
+     */
+    fun sendIdentity() {
+        val p = identity(0).toPacket()
+        connectedPaired().forEach { it.send(p) }
+    }
 
     // ---------------------------------------------------------------- network
 
@@ -184,10 +198,16 @@ object FluxCore {
                 notificationAccess = Android.hasNotificationAccess(app),
                 callAlerts = settings.callAlerts,
                 callAccess = Android.hasPhoneState(app),
+                smsSync = settings.syncSms,
+                smsAccess = SmsSync.hasAccess(app),
+                smsSupported = SmsSync.supported(app),
+                agentInputAlerts = settings.agentInputAlerts,
+                agentDoneAlerts = settings.agentDoneAlerts,
                 ringingFrom = ringingFrom,
                 browse = browse,
                 listeningUdp = backend?.listeningUdp ?: true,
                 enabled = settings.enabled,
+                theme = settings.theme,
             )
         }
         _state.value = snapshot
@@ -277,8 +297,15 @@ object FluxCore {
         }
     }
 
+    fun setTheme(mode: ThemeMode) {
+        settings.theme = mode
+        Android.setNightMode(app, mode)
+        publish()
+    }
+
     fun setSyncClipboard(on: Boolean) {
         settings.syncClipboard = on
+        sendIdentity()
         publish()
     }
 
@@ -287,8 +314,23 @@ object FluxCore {
         publish()
     }
 
+    fun setSyncSms(on: Boolean) {
+        settings.syncSms = on
+        publish()
+    }
+
     fun setSyncDnd(on: Boolean) {
         settings.syncDnd = on
+        publish()
+    }
+
+    fun setAgentInputAlerts(on: Boolean) {
+        settings.agentInputAlerts = on
+        publish()
+    }
+
+    fun setAgentDoneAlerts(on: Boolean) {
+        settings.agentDoneAlerts = on
         publish()
     }
 

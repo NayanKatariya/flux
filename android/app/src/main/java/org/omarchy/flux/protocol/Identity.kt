@@ -26,6 +26,11 @@ object Types {
     const val SFTP = "kdeconnect.sftp"
     const val SFTP_REQUEST = "kdeconnect.sftp.request"
     const val TELEPHONY = "kdeconnect.telephony"
+    const val SMS_MESSAGES = "kdeconnect.sms.messages"
+    const val SMS_REQUEST = "kdeconnect.sms.request"
+    const val SMS_REQUEST_CONVERSATIONS = "kdeconnect.sms.request_conversations"
+    const val SMS_REQUEST_CONVERSATION = "kdeconnect.sms.request_conversation"
+    const val MOUSEPAD_REQUEST = "kdeconnect.mousepad.request"
 
     /** Flux extension: this phone opens a listener that the computer connects to. */
     const val FLUX_TUNNEL = "flux.tunnel"
@@ -44,6 +49,15 @@ object Types {
 
     /** Flux extension: the computer asks this phone to approve sudo with a fingerprint. */
     const val FLUX_APPROVE = "flux.approve"
+
+    /** Flux extension: the computer sends its herdr agents, and this phone asks for their output. Both sides send it. */
+    const val FLUX_HERDR = "flux.herdr"
+
+    /** Flux extension: an image that one side copied, as the payload, with {"mime": "image/png"}. Both sides send it. */
+    const val FLUX_CLIPBOARD_IMAGE = "flux.clipboard.image"
+
+    /** Flux extension: the computer tells whether it accepts remote input, {"enabled": bool}. */
+    const val FLUX_INPUT = "flux.input"
 }
 
 /** Packet types that the phone accepts. */
@@ -52,16 +66,31 @@ val INCOMING = listOf(
     Types.SHARE, Types.SHARE_UPDATE, Types.NOTIFICATION, Types.NOTIFICATION_REQUEST, Types.NOTIFICATION_REPLY,
     Types.NOTIFICATION_ACTION, Types.FIND_MY_PHONE, Types.RUN_COMMAND, Types.MPRIS,
     Types.SFTP, Types.FLUX_TUNNEL, Types.FLUX_WEBCAM, Types.FLUX_DND,
-    Types.FLUX_MIC, Types.FLUX_SCREEN, Types.FLUX_APPROVE,
+    Types.FLUX_MIC, Types.FLUX_SCREEN, Types.FLUX_APPROVE, Types.FLUX_HERDR, Types.FLUX_INPUT,
 )
 
 /** Packet types that the phone sends. */
 val OUTGOING = listOf(
     Types.PING, Types.BATTERY, Types.CLIPBOARD, Types.CLIPBOARD_CONNECT, Types.SHARE,
-    Types.SHARE_UPDATE, Types.NOTIFICATION, Types.FIND_MY_PHONE, Types.RUN_COMMAND_REQUEST,
-    Types.MPRIS_REQUEST, Types.SFTP_REQUEST, Types.TELEPHONY, Types.FLUX_TUNNEL, Types.FLUX_WEBCAM, Types.FLUX_DND,
-    Types.FLUX_MIC, Types.FLUX_SCREEN, Types.FLUX_APPROVE,
+    Types.SHARE_UPDATE, Types.NOTIFICATION, Types.RUN_COMMAND_REQUEST, Types.MPRIS_REQUEST,
+    Types.SFTP_REQUEST, Types.TELEPHONY, Types.FLUX_TUNNEL, Types.FLUX_WEBCAM, Types.FLUX_DND,
+    Types.FLUX_MIC, Types.FLUX_SCREEN, Types.FLUX_APPROVE, Types.FLUX_HERDR, Types.FLUX_CLIPBOARD_IMAGE,
+    Types.MOUSEPAD_REQUEST,
 )
+
+/**
+ * The phone accepts clipboard images only while Sync clipboard is on, so
+ * that a computer does not send an image that the phone drops.
+ */
+val CLIPBOARD_IMAGE_INCOMING = listOf(Types.FLUX_CLIPBOARD_IMAGE)
+
+/**
+ * The SMS packet types. The phone lists them only while text messages are
+ * on and the phone allows SMS access, so that a computer shows its
+ * Messages page only when the phone can answer.
+ */
+val SMS_INCOMING = listOf(Types.SMS_REQUEST, Types.SMS_REQUEST_CONVERSATIONS, Types.SMS_REQUEST_CONVERSATION)
+val SMS_OUTGOING = listOf(Types.SMS_MESSAGES)
 
 /** The body of a kdeconnect.identity packet. */
 data class Identity(
@@ -114,8 +143,15 @@ data class Identity(
             )
         }
 
-        fun self(deviceId: String, name: String, tcpPort: Int) = Identity(
-            deviceId, cleanName(name), "phone", PROTOCOL_VERSION, INCOMING, OUTGOING, tcpPort,
+        /**
+         * The identity of this phone. [sms] adds the SMS packet types, and
+         * [clipboardImages] adds the incoming clipboard images.
+         */
+        fun self(deviceId: String, name: String, tcpPort: Int, sms: Boolean = false, clipboardImages: Boolean = false) = Identity(
+            deviceId, cleanName(name), "phone", PROTOCOL_VERSION,
+            INCOMING + (if (sms) SMS_INCOMING else emptyList()) + (if (clipboardImages) CLIPBOARD_IMAGE_INCOMING else emptyList()),
+            if (sms) OUTGOING + SMS_OUTGOING else OUTGOING,
+            tcpPort,
         )
     }
 }

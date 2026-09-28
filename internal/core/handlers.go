@@ -56,21 +56,19 @@ func (d *Daemon) handlePacket(dev *Device, l *lan.Link, p *proto.Packet) {
 		d.handleConnectivity(dev, p)
 	case proto.TypeClipboard, proto.TypeClipboardConnect:
 		d.handleClipboard(dev, p)
+	case proto.TypeFluxClipboardImage:
+		d.handleClipboardImage(dev, l, p)
 	case proto.TypeShare:
 		d.handleShare(dev, l, p)
 	case proto.TypeShareUpdate:
 		// The totals of a multi-file share. Flux counts files as they arrive.
 	case proto.TypeNotification:
 		d.handleNotification(dev, l, p)
-	case proto.TypeFindMyPhone:
-		d.handleFindMyPhone(dev)
 	case proto.TypeRunCommand:
 		// The command list of another desktop. fluxd does not run commands
 		// on other devices.
 	case proto.TypeRunCommandRequest:
 		d.handleRunCommand(dev, l, p)
-	case proto.TypeMpris:
-		d.handlePhoneMedia(dev, l, p)
 	case proto.TypeMprisRequest:
 		d.handleDesktopMediaRequest(l, p)
 	case proto.TypeSftp:
@@ -87,6 +85,10 @@ func (d *Daemon) handlePacket(dev *Device, l *lan.Link, p *proto.Packet) {
 		d.handleScreen(dev, l, p)
 	case proto.TypeFluxApprove:
 		d.handleApprove(dev, p)
+	case proto.TypeFluxHerdr:
+		d.handleHerdr(dev, l, p)
+	case proto.TypeMousepadRequest:
+		d.handleMousepad(dev, p)
 	case proto.TypeSmsMessages:
 		d.handleSms(dev, p)
 	case proto.TypeTelephony:
@@ -124,11 +126,32 @@ func (d *Daemon) handleBattery(dev *Device, p *proto.Packet) {
 	} else {
 		dev.battery = &Battery{Charge: body.Charge, Charging: body.Charging}
 	}
+	alert := dev.lowBatteryAlert(body.Threshold == 1, body.Charge, body.Charging)
 	d.mu.Unlock()
-	if body.Threshold == 1 {
+	if alert {
 		d.notify(desktop.Notification{AppName: "Flux", Title: dev.Name + " battery is low", Body: strconv.Itoa(body.Charge) + "% left", Urgency: 2})
 	}
 	d.markDirty()
+}
+
+// lowCharge is the charge in percent at or below which a battery that
+// does not charge is low.
+const lowCharge = 15
+
+// lowBatteryAlert reports whether a battery packet shows the low-battery
+// notification. A Flux device marks each reading at or below lowCharge as
+// low, also after a reconnect. The notification shows once per discharge.
+// It shows again after the battery charges or rises above lowCharge.
+func (dev *Device) lowBatteryAlert(low bool, charge int, charging bool) bool {
+	switch {
+	case low:
+		alert := !dev.batteryLow
+		dev.batteryLow = true
+		return alert
+	case charging || charge > lowCharge:
+		dev.batteryLow = false
+	}
+	return false
 }
 
 // sendBattery sends the battery of this computer. A desktop without a
@@ -139,7 +162,7 @@ func (d *Daemon) sendBattery(l *lan.Link) {
 		return
 	}
 	threshold := 0
-	if b.Charge <= 15 && !b.Charging {
+	if b.Charge <= lowCharge && !b.Charging {
 		threshold = 1
 	}
 	_ = l.Send(proto.New(proto.TypeBattery, map[string]any{"currentCharge": b.Charge, "isCharging": b.Charging, "thresholdEvent": threshold}))
@@ -188,33 +211,6 @@ func (d *Daemon) handleConnectivity(dev *Device, p *proto.Packet) {
 	}
 	d.mu.Unlock()
 	d.markDirty()
-}
-
-func (d *Daemon) handleFindMyPhone(dev *Device) {
-	d.mu.Lock()
-	d.ringing, d.ringFrom = true, dev.Name
-	d.mu.Unlock()
-	d.ringer.Start()
-	d.notify(desktop.Notification{
-		AppName: "Flux", Title: dev.Name + " is ringing this computer",
-		Actions: []desktop.Action{{Key: "ring-stop", Label: "I found it"}},
-		Urgency: 2, Timeout: -1,
-	})
-	d.markDirty()
-	// Stop after 2 minutes, so a lost phone cannot ring the PC forever.
-	time.AfterFunc(2*time.Minute, func() { d.StopRing() })
-}
-
-// StopRing stops the local ring.
-func (d *Daemon) StopRing() {
-	d.ringer.Stop()
-	d.mu.Lock()
-	changed := d.ringing
-	d.ringing, d.ringFrom = false, ""
-	d.mu.Unlock()
-	if changed {
-		d.markDirty()
-	}
 }
 
 func (d *Daemon) handleRunCommand(dev *Device, l *lan.Link, p *proto.Packet) {
