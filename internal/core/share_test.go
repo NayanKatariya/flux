@@ -42,14 +42,14 @@ func TestCopyImage(t *testing.T) {
 		t.Errorf("clipboard has %q as %s", clip.image, clip.mime)
 	}
 
-	// A file that is not a PNG stays off the clipboard.
+	// A file that is not an image stays off the clipboard.
 	other := filepath.Join(dir, "signature.txt")
 	if err := os.WriteFile(other, []byte("not an image"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	clip.image, clip.mime = nil, ""
 	if err := d.copyImage(other); err == nil {
-		t.Error("copied a file that is not a PNG")
+		t.Error("copied a file that is not an image")
 	}
 	if clip.image != nil {
 		t.Errorf("clipboard has %q", clip.image)

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -166,12 +165,8 @@ func (d *Daemon) CopyTransfer(id string) error {
 // chats and editors. Any other file goes on as a file URI, so that it
 // pastes into a file manager.
 func (d *Daemon) copyFile(path string) error {
-	if info, err := os.Stat(path); err == nil && info.Size() <= maxClipboardImage {
-		if data, err := os.ReadFile(path); err == nil {
-			if mime := http.DetectContentType(data); strings.HasPrefix(mime, "image/") {
-				return d.clip.SetImage(data, mime)
-			}
-		}
+	if err := d.copyImage(path); !errors.Is(err, errNoImage) {
+		return err
 	}
 	uri := (&url.URL{Scheme: "file", Path: path}).String()
 	return d.clip.SetImage([]byte(uri+"\r\n"), "text/uri-list")
@@ -243,8 +238,8 @@ const (
 // maxClipboardImage is the largest signature that fluxd puts on the clipboard.
 const maxClipboardImage = 16 << 20
 
-// pngMagic starts every PNG file.
-var pngMagic = []byte("\x89PNG\r\n\x1a\n")
+// errNoImage marks a file that copyImage does not put on the clipboard.
+var errNoImage = errors.New("no clipboard image")
 
 // destDir returns the folder for a received file of the kind.
 func destDir(cfg *config.Config, kind fileDest) string {
@@ -318,16 +313,6 @@ func (d *Daemon) receiveFile(dev *Device, l *lan.Link, p *proto.Packet, name str
 		title = "Photo from " + dev.Name
 	case destScreenshot:
 		title = "Screenshot from " + dev.Name
-		d.mu.Lock()
-		auto := d.cfg.AutoClipboard
-		d.mu.Unlock()
-		if auto {
-			if err := d.copyFile(t.Path); err != nil {
-				d.logf("copy screenshot %s: %v", t.Path, err)
-			} else {
-				body = "Copied to the clipboard. Saved as " + t.Path
-			}
-		}
 	case destSignature:
 		title = "Signature from " + dev.Name
 		if err := d.copyImage(t.Path); err != nil {
@@ -345,9 +330,10 @@ func (d *Daemon) receiveFile(dev *Device, l *lan.Link, p *proto.Packet, name str
 	}
 }
 
-// copyImage puts the PNG file at path on the clipboard, so that the user
-// can paste it at once. The file must be a PNG of at most
-// maxClipboardImage bytes.
+// copyImage puts the image file at path on the clipboard, so that the user
+// can paste it at once. The file must be an image of at most
+// maxClipboardImage bytes. For any other file, copyImage returns an error
+// that wraps errNoImage.
 func (d *Daemon) copyImage(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -359,12 +345,13 @@ func (d *Daemon) copyImage(path string) error {
 		return err
 	}
 	if len(data) > maxClipboardImage {
-		return fmt.Errorf("the image is larger than %d MiB", maxClipboardImage>>20)
+		return fmt.Errorf("%w: the image is larger than %d MiB", errNoImage, maxClipboardImage>>20)
 	}
-	if !bytes.HasPrefix(data, pngMagic) {
-		return errors.New("the file is not a PNG image")
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "image/") {
+		return fmt.Errorf("%w: the file is not an image", errNoImage)
 	}
-	return d.clip.SetImage(data, "image/png")
+	return d.clip.SetImage(data, mime)
 }
 
 // saveScan writes text that the phone camera read into a new file in the

@@ -100,6 +100,19 @@ func TestClipboardObserve(t *testing.T) {
 	if _, ok := c.observe("from phone"); ok {
 		t.Fatal("the echo of Set must not be reported")
 	}
+	uri := "file:///home/me/a%20b.pdf\r\n"
+	c.mu.Lock()
+	c.lastSeen = seenText([]byte(uri), "text/uri-list")
+	c.mu.Unlock()
+	if _, ok := c.observe(uri); ok {
+		t.Fatal("a copied file URI must not be reported")
+	}
+	c.mu.Lock()
+	c.lastSeen = seenText([]byte("\x89PNG"), "image/png")
+	c.mu.Unlock()
+	if _, ok := c.observe(uri); !ok {
+		t.Fatal("text after an image must be reported")
+	}
 }
 
 func TestLoopbackABI(t *testing.T) {

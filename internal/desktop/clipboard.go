@@ -144,11 +144,13 @@ func (c *Clipboard) Set(text string) error {
 	return nil
 }
 
-// SetImage puts an image on the clipboard with the MIME type mime, such as
-// image/png. The next text copy syncs, also when it equals the last text.
+// SetImage puts data on the clipboard with the MIME type mime, such as
+// image/png or text/uri-list. After an image, the next text copy syncs,
+// also when it equals the last text. wl-copy also offers text data as
+// text/plain, so Watch skips it as it skips the text of Set.
 func (c *Clipboard) SetImage(data []byte, mime string) error {
 	c.mu.Lock()
-	c.lastSeen = ""
+	c.lastSeen = seenText(data, mime)
 	c.mu.Unlock()
 	// As in Set, the output goes to /dev/null so that Run does not wait
 	// for the process that serves the clipboard.
@@ -158,6 +160,15 @@ func (c *Clipboard) SetImage(data []byte, mime string) error {
 		return fmt.Errorf("wl-copy: %w", err)
 	}
 	return nil
+}
+
+// seenText returns the text that Watch reads after SetImage puts data of
+// the MIME type mime on the clipboard.
+func seenText(data []byte, mime string) string {
+	if strings.HasPrefix(mime, "text/") {
+		return string(data)
+	}
+	return ""
 }
 
 // isText reports whether b looks like text and not binary data.
